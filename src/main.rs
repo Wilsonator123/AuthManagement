@@ -1,9 +1,9 @@
-use axum::{Router, routing::get};
-use dotenvy::dotenv;
-use sqlx::postgres::PgPoolOptions;
+use axum::{Extension, Router, routing::get};
+use tower_http::trace::TraceLayer;
 use tracing::{Level, info};
 use tracing_subscriber;
 
+mod config;
 mod routes;
 
 #[tokio::main]
@@ -11,18 +11,15 @@ async fn main() -> Result<(), sqlx::Error> {
     // initialize tracing for logging
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
-    dotenv().ok();
-    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let _pool = PgPoolOptions::new().connect(&url).await?;
-    info!("Connected to the database!");
+    let pool = config::database::open_connection().await.unwrap();
 
     // build our application with a route
     let app = Router::new()
-        // `GET /` goes to `root`
         .route("/", get(root))
-        .merge(routes::app::routes());
+        .merge(routes::app::routes(pool.clone()))
+        .layer(Extension(pool))
+        .layer(TraceLayer::new_for_http());
 
-    // run our app with hyper, listening globally on port 5000
     let listener = tokio::net::TcpListener::bind("0.0.0.0:5000").await.unwrap();
     info!("Server is running on http://0.0.0.0:5000");
     axum::serve(listener, app).await.unwrap();
